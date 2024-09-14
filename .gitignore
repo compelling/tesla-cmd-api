@@ -1,4 +1,4 @@
 node_modules/
 .vscode/
 *.pem
-oauth.json
+*.lock

@@ -38,7 +38,7 @@ class ApiError extends Error {
 
 function getHostFromToken(accesToken) {
     const parts = accesToken.split('.');
-    if (parts.length != 3) throw new Error("Invalid OAuth access token");
+    if (parts.length != 3) throw new Error("Invalid OAuth access token" + JSON.stringify(parts));
     const info = JSON.parse(Buffer.from(parts[1], "base64"));
     let host = 'fleet-api.prd.na.vn.cloud.tesla.com';
     for(let url of info.aud) {
@@ -54,10 +54,9 @@ function getHostFromToken(accesToken) {
 }
 
 class FleetApi {
-    constructor(client_id, access_token = null, refresh_token = null) {
+    constructor(client_id, access_token = null) {
         this.client_id = client_id;
         this.access_token = access_token;
-        this.refresh_token = refresh_token;
         this.timeout = 10000;
         this.baseApi = 'https://'+getHostFromToken(access_token)+'/api/1';
     }
@@ -90,30 +89,6 @@ class FleetApi {
         this.cb_refreshToken = callback;
     }
 
-    async refreshToken(refresh_token, retry = 1) {
-        try {
-            const oauth = await this.#oauthCall({
-                grant_type: 'refresh_token',
-                client_id: this.client_id,
-                refresh_token
-            });
-            this.refresh_token = oauth.refresh_token;
-            this.access_token = oauth.access_token;
-            if (typeof this.cb_refreshToken == 'function') {
-                this.cb_refreshToken(this.access_token, this.refresh_token);
-            }
-            return oauth;   
-        }
-        catch(error) {
-            if (retry < 3) {
-                await new Promise(resolve => setTimeout(resolve, 500));
-                return this.refreshToken(refresh_token, retry + 1);
-            }
-            if (error instanceof Error) error.message += " - Unable to refresh Token";
-            throw error;            
-        }
-    }
-
     async #apiCall(path, method = 'GET', params = undefined) {
         const axiosData = {
             method: method.toLowerCase(),
@@ -132,10 +107,6 @@ class FleetApi {
         } catch (e) {
             if (e instanceof axios.AxiosError && e.hasOwnProperty('response')) {
                 const status = e.response.status;
-                if (status == 401 && this.refresh_token != null) {
-                    await this.refreshToken(this.refresh_token);
-                    return this.#apiCall(path, method, params);
-                }
                 const error = (e.response.hasOwnProperty('data') && e.response.data.hasOwnProperty('error'))?
                     e.response.data.error : e.response.statusText;
                 throw new ApiError(`${error} (${status})`, ApiError.fromStatus(status));

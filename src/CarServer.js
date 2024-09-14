@@ -22,6 +22,7 @@ class CarServer {
     }
 
     async #sendRequest(req) {
+        console.log('sendRequest req', req);
         const message = msgProto.create(req);
         const buffer = msgProto.encode(message).finish();
         const bufResp = await this.api.signedCommand(this.vin, buffer);
@@ -38,7 +39,7 @@ class CarServer {
             throw new Error('Invalid destination address');
         if (!res.hasOwnProperty('requestUuid'))
             throw new Error('Missing request UUID');
-
+        console.log('sendRequest res', res);
         // Update session
         if (res.hasOwnProperty('sessionInfo') && res.hasOwnProperty('signatureData')) {
             if (!res.signatureData.hasOwnProperty('sessionInfoTag') || !res.signatureData.sessionInfoTag.hasOwnProperty('tag'))
@@ -56,7 +57,7 @@ class CarServer {
             return carServerResponseProto.decode(res.protobufMessageAsBytes);
         }
         else {
-            throw new Error("Invalid response");
+            throw new Error("Invalid response" + JSON.stringify(res));
         }
     }
 
@@ -104,6 +105,16 @@ class CarServer {
 
     async chargingSetLimit(percent) {
         await this.#requestAction({ chargingSetLimitAction: { percent } });
+    }
+
+    async chargingStartStop(action) {
+
+        const charging_action = (action === "start" ? 2 : 5); // see message ChargingStartStopAction
+        await this.#requestAction({ chargingStartStopAction: { charging_action } });
+    }
+
+    async setChargingAmps(charging_amps) {
+        await this.#requestAction({ setChargingAmpsAction: { charging_amps } });
     }
 }
 
