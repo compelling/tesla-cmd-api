@@ -69,7 +69,9 @@ class Signer {
     constructor(key, verifierName, verifierSessionInfo) {
         this.session = new AuthSession(key, verifierSessionInfo.publicKey);
         this.verifierName = verifierName;
-        this.timeZero = Math.floor(Date.now() / 1000) - verifierSessionInfo.clockTime;
+        let now = Date.now();
+        // now = now + 3600000;
+        this.timeZero = Math.floor(now / 1000) - verifierSessionInfo.clockTime;
         this.epoch = Buffer.from(verifierSessionInfo.epoch, 0, 16);
         this.counter = verifierSessionInfo.counter;
     }
@@ -91,7 +93,9 @@ class Signer {
         meta.add(Tags.TAG_DOMAIN, Buffer.from([domain]));
         meta.add(Tags.TAG_PERSONALIZATION, Buffer.from(this.verifierName));
         
-        const expiresAt = Math.floor(Date.now() / 1000) + expiresIn - this.timeZero;
+        let now = Date.now();
+        // now = now + 3600000;
+        const expiresAt = Math.floor(now / 1000) + expiresIn - this.timeZero;
         // Bounds check ensures: (1) we can encode in a 4-byte buffer and (2)
         // will not overflow time.Duration.
         if (expiresAt > EPOCH_LENGTH || expiresAt < 0) throw new Error("out of bounds expiration time");

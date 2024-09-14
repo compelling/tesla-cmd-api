@@ -3,6 +3,8 @@ import protobuf from "protobufjs";
 import { Signer } from './Signer.js';
 import { randomBytes } from 'crypto'
 
+const EXPIRES_IN = 15; // default 5 sec
+
 const protoSignatures = await protobuf.load('proto/signatures.proto');
 const protoMessage = await protobuf.load('proto/universal_message.proto');
 const protoCarServer = await protobuf.load('proto/car_server.proto');
@@ -12,6 +14,9 @@ const sessionInfoProto = protoSignatures.lookupType("Signatures.SessionInfo");
 const carServerResponseProto = protoCarServer.lookupType('CarServer.Response');
 const actionProto = protoCarServer.lookupType("CarServer.Action");
 const ActionResult = protoCarServer.lookupEnum('CarServer.OperationStatus_E').values;
+const MessageFault = protoMessage.lookupEnum("UniversalMessage.MessageFault_E").values;
+const DOMAIN_INFOTAINMENT = Domain.DOMAIN_INFOTAINMENT;
+const DOMAIN_VEHICLE_SECURITY = Domain.DOMAIN_VEHICLE_SECURITY;
 
 class CarServer {
     constructor(fleetApi, vin, privateKey) {
@@ -50,20 +55,32 @@ class CarServer {
                 this.signer = null;
                 throw new Error("Session info hmac invalid");
             }
+            // Return error if request timed out
+            if (res.hasOwnProperty('signedMessageStatus') && res.signedMessageStatus.hasOwnProperty('operationStatus')){
+                if (res.signedMessageStatus.operationStatus != this.ActionResult.OPERATIONSTATUS_OK){
+                    throw new Error("Signed message error: "+this.MessageFault[res.signedMessageStatus.signedMessageFault]);
+                }
+            }
             return sessionInfo;
         }
         // Return response payload
+        else if (res.hasOwnProperty('signedMessageStatus') && res.signedMessageStatus.hasOwnProperty('operationStatus')){
+            // Return error
+            if (res.signedMessageStatus.operationStatus != ActionResult.OPERATIONSTATUS_OK){
+                throw new Error("Signed message error: " + MessageFault[res.signedMessageStatus.signedMessageFault]);
+            }
+        }
         else if (res.hasOwnProperty('protobufMessageAsBytes')) {
             return carServerResponseProto.decode(res.protobufMessageAsBytes);
         }
         else {
-            throw new Error("Invalid response" + JSON.stringify(res));
+            throw new Error("Invalid response: " + JSON.stringify(res));
         }
     }
 
     async startSession() {
         await this.#sendRequest({
-            toDestination: { domain: Domain.DOMAIN_INFOTAINMENT }, 
+            toDestination: { domain: this.domain },
             fromDestination: { routingAddress: randomBytes(16) },
             sessionInfoRequest: { publicKey: this.privateKey.publicKey },
             uuid: randomBytes(16)
@@ -76,25 +93,31 @@ class CarServer {
     }
 
     async #requestAction(action) {
+        if (this.signer == null) await this.startSession();
         if (this.signer == null) throw new Error('Session not started');
         const payload = actionProto.create({ vehicleAction: action });
         const encodedPayload = actionProto.encode(payload).finish();
-        const signature = this.signer.generateSignature(encodedPayload, Domain.DOMAIN_INFOTAINMENT, 5);
+        const signature = this.signer.generateSignature(encodedPayload, this.domain, EXPIRES_IN);
         const response = await this.#sendRequest({
-            toDestination: { domain: Domain.DOMAIN_INFOTAINMENT }, 
+            toDestination: { domain: this.domain },
             fromDestination: { routingAddress: randomBytes(16) },
             protobufMessageAsBytes: encodedPayload,
             signatureData: signature,
             uuid: randomBytes(16),
             flags: 0
         });
-        if (response.hasOwnProperty('actionStatus') && response.actionStatus.hasOwnProperty('result')) {
+        if (response.hasOwnProperty('actionStatus') && ( response.actionStatus.hasOwnProperty('result') || response.actionStatus.result != undefined) ) {
             switch(response.actionStatus.result) {
                 case ActionResult.OPERATIONSTATUS_OK:
                     return;
                 case ActionResult.OPERATIONSTATUS_ERROR:
-                    if (response.actionStatus.hasOwnProperty('resultReason'))
+                    if (response.actionStatus.hasOwnProperty('resultReason')){
+                        if (response.actionStatus.resultReason.plainText == 'already_set'){
+                            // If value was already set, it's not an error!
+                            return;
+                        }
                         throw new Error(this.#decodeError(response.actionStatus.resultReason));
+                    }
                     else
                         throw new Error('Unknown error');
                 default:
@@ -104,16 +127,18 @@ class CarServer {
     }
 
     async chargingSetLimit(percent) {
+        this.domain = DOMAIN_INFOTAINMENT;
         await this.#requestAction({ chargingSetLimitAction: { percent } });
     }
 
     async chargingStartStop(action) {
-
+        this.domain = DOMAIN_VEHICLE_SECURITY;
         const charging_action = (action === "start" ? 2 : 5); // see message ChargingStartStopAction
         await this.#requestAction({ chargingStartStopAction: { charging_action } });
     }
 
     async setChargingAmps(charging_amps) {
+        this.domain = DOMAIN_INFOTAINMENT;
         await this.#requestAction({ setChargingAmpsAction: { charging_amps } });
     }
 }

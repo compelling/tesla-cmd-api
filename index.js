@@ -25,7 +25,6 @@ const fleetApi = new FleetApi(clientId, accessToken);
 // CarServer initialization
 const cmdApi = new CarServer(fleetApi, vin, key);
 
-await cmdApi.startSession();
 if (action === "chargingSetLimit") await cmdApi.chargingSetLimit(actionParam);
 if (action === "chargingStartStop") await cmdApi.chargingStartStop(actionParam);
 if (action === "setChargingAmps") await cmdApi.setChargingAmps(actionParam);
